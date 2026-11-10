@@ -44,5 +44,42 @@ func main() {
 		logger.Warn("failed to load maxmind database", "error", err)
 	}
 
-	// Initialize Redis rate limiter using DefaultConfig (reads REDIS_URL automatically from environment)
-	rate
+	// Initialize Redis rate limiter using DefaultConfig
+	rateLimiterConfig := ratelimit.DefaultConfig()
+
+	ratelimiter, err := ratelimit.NewRedisLimiter(ctx, rateLimiterConfig)
+	if err != nil {
+		logger.Error("failed to initialize redis rate limiter", "error", err)
+		os.Exit(1)
+	}
+	defer ratelimiter.Close()
+
+	r := mux.NewRouter()
+
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Lets-Bet Server is Working Perfectly! 🚀"))
+	}).Methods("GET")
+
+	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}).Methods("GET")
+
+	rec := metrics.New("gateway")
+	rec.RegisterRoutes(r)
+
+	// Apply middleware stack
+	r.Use(tracing.HTTPMiddleware("gateway"))
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Recovery)
+	r.Use(middleware.Logging)
+	r.Use(middleware.CORS(cfg.Security))
+	r.Use(middleware.Geolocation(middleware.GeoConfig{
+		Provider: geoProvider,
+		Allowed:  cfg.Tenant.AllowedCountries,
+	}))
+
+	r.Use(ratelimiter.HTTPMiddleware())
+
+	addr :=
