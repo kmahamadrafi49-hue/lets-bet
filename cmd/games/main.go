@@ -100,13 +100,12 @@ func main() {
 
 	r := mux.NewRouter()
 
-	// Serve index.html at root path
+	// FORCE OVERRIDE: Serve index.html and static files directly at the very beginning
 	r.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		http.ServeFile(w, req, "index.html")
 	})
-
-	// Serve static files (images, etc.) from the root directory
-	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./"))))
+	r.PathPrefix("/images/").Handler(http.StripPrefix("/images/", http.FileServer(http.Dir("./"))))
+	r.PathPrefix("/static/").Handler(http.FileServer(http.Dir("./")))
 
 	rec := metrics.New("games")
 	rec.RegisterRoutes(r)
