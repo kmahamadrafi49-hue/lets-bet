@@ -38,12 +38,6 @@ func main() {
 	}
 	defer cleanup()
 
-	// Initialize MaxMind GeoIP provider (optional)
-	geoProvider, err := middleware.NewMaxMindProvider(middleware.DefaultDBPath())
-	if err != nil {
-		logger.Warn("failed to load maxmind database", "error", err)
-	}
-
 	// Initialize Redis rate limiter using DefaultConfig
 	rateLimiterConfig := ratelimit.DefaultConfig()
 
@@ -75,10 +69,6 @@ func main() {
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)
 	r.Use(middleware.CORS(cfg.Security))
-	r.Use(middleware.Geolocation(middleware.GeoConfig{
-		Provider: geoProvider,
-		Allowed:  cfg.Tenant.AllowedCountries,
-	}))
 
 	r.Use(ratelimiter.HTTPMiddleware())
 
