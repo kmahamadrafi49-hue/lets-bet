@@ -47,4 +47,38 @@ func main() {
 	// Initialize Redis rate limiter using DefaultConfig (reads REDIS_URL automatically from environment)
 	rateLimiterConfig := ratelimit.DefaultConfig()
 
-	ratel
+	ratelimiter, err := ratelimit.NewRedisLimiter(ctx, rateLimiterConfig)
+	if err != nil {
+		logger.Error("failed to initialize redis rate limiter", "error", err)
+		os.Exit(1)
+	}
+	defer ratelimiter.Close()
+
+	r := mux.NewRouter()
+
+	rec := metrics.New("gateway")
+	rec.RegisterRoutes(r)
+
+	// Apply middleware stack
+	r.Use(tracing.HTTPMiddleware("gateway"))
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Recovery)
+	r.Use(middleware.Logging)
+	r.Use(middleware.CORS(cfg.Security))
+	r.Use(middleware.Geolocation(middleware.GeoConfig{
+		Provider: geoProvider,
+		Allowed:  cfg.Tenant.AllowedCountries,
+	}))
+
+	// Apply Redis rate limiter middleware
+	r.Use(ratelimiter.HTTPMiddleware())
+
+	health.NewHandler("gateway", "dev").RegisterRoutes(r)
+
+	// Gateway handlers will be added when implemented
+	addr := fmt.Sprintf(":%d", cfg.Service.Port)
+	if err := server.RunHTTP(ctx, addr, r, logger); err != nil {
+		logger.Error("server terminated with error", "error", err)
+		os.Exit(1)
+	}
+}
