@@ -21,7 +21,7 @@ COPY --from=builder /src/migrations /app/migrations
 
 ENV REDIS_HOST=ohio-keyvalue.render.com
 ENV REDIS_PORT=6379
-ENV REDIS_PASSWORDClNOkUmebWp7GSloeU8smJOL82qgs4H
+ENV REDIS_PASSWORD=ClNOkUmebWp7GSloeU8smJOL82qgs4H
 ENV REDIS_DB=0
 
 USER nonroot:nonroot
