@@ -100,8 +100,13 @@ func main() {
 
 	r := mux.NewRouter()
 
-	// Serve static files and index.html from the root directory
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./")))
+	// Serve index.html at root path
+	r.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		http.ServeFile(w, req, "index.html")
+	})
+
+	// Serve static files (images, etc.) from the root directory
+	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./"))))
 
 	rec := metrics.New("games")
 	rec.RegisterRoutes(r)
