@@ -1,3 +1,11 @@
+// Package ratelimit provides Redis-backed rate limiting for the betting platform.
+//
+// It implements:
+// - Per-user rate limiting
+// - Per-IP rate limiting
+// - Sliding window algorithm
+// - Distributed rate limiting across multiple instances
+// - Configurable limits and windows
 package ratelimit
 
 import (
@@ -11,11 +19,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// RedisLimiter implements rate limiting using Redis
 type RedisLimiter struct {
 	client *redis.Client
 	config *Config
 }
 
+// NewRedisLimiter creates a new Redis-backed rate limiter
 func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error) {
 	if config == nil {
 		config = DefaultConfig()
@@ -27,9 +37,8 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 		DB:       config.RedisDB,
 	}
 
-	// Render క్లౌడ్ రెడిస్ అయితే TLS మరియు డిఫాల్ట్ యూజర్‌నేమ్ సెట్ చేయడం
+	// Render క్లౌడ్ రెడిస్ కోసం సెక్యూర్ TLS కనెక్షన్ ఎనేబుల్ చేయడం (లోకల్ అయితే ఆటోమేటిక్‌గా స్కిప్ అవుతుంది)
 	if config.RedisAddr != "localhost:6379" && config.RedisAddr != "127.0.0.1:6379" {
-		opt.Username = "default"
 		opt.TLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
@@ -47,17 +56,20 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 	}, nil
 }
 
+// CheckUserLimit checks if a user has exceeded their rate limit
 func (rl *RedisLimiter) CheckUserLimit(ctx context.Context, userID uuid.UUID) (*LimitResult, error) {
 	key := rl.config.UserPrefix + userID.String()
 	return rl.checkLimit(ctx, key, rl.config.UserRequestsPerWindow, rl.config.UserWindow, "user")
 }
 
+// CheckIPLimit checks if an IP has exceeded their rate limit
 func (rl *RedisLimiter) CheckIPLimit(ctx context.Context, ip string) (*LimitResult, error) {
 	normalizedIP := net.ParseIP(ip)
 	if normalizedIP == nil {
 		return nil, fmt.Errorf("invalid IP address: %s", ip)
 	}
 
+	// Use IPv4 or IPv6 representation consistently
 	var key string
 	if normalizedIP.To4() != nil {
 		key = rl.config.IPPrefix + normalizedIP.String()
@@ -68,16 +80,19 @@ func (rl *RedisLimiter) CheckIPLimit(ctx context.Context, ip string) (*LimitResu
 	return rl.checkLimit(ctx, key, rl.config.IPRequestsPerWindow, rl.config.IPWindow, "ip")
 }
 
+// CheckGlobalLimit checks if the global limit has been exceeded
 func (rl *RedisLimiter) CheckGlobalLimit(ctx context.Context) (*LimitResult, error) {
 	key := rl.config.GlobalPrefix + "all"
 	return rl.checkLimit(ctx, key, rl.config.GlobalRequestsPerWindow, rl.config.GlobalWindow, "global")
 }
 
+// checkLimit perform the actual rate limit check using sliding window
 func (rl *RedisLimiter) checkLimit(ctx context.Context, key string, limit int, window time.Duration, limitType string) (*LimitResult, error) {
 	now := time.Now()
 	windowStart := now.Truncate(window)
 	windowEnd := windowStart.Add(window)
 
+	// Use Lua script for atomic sliding window implementation
 	luaScript := `
 		local key = KEYS[1]
 		local window_start = ARGV[1]
@@ -85,14 +100,19 @@ func (rl *RedisLimiter) checkLimit(ctx context.Context, key string, limit int, w
 		local limit = tonumber(ARGV[3])
 		local now = ARGV[4]
 
+		-- Remove expired entries
 		redis.call('ZREMRANGEBYSCORE', key, 0, window_start - 1)
+
+		-- Count current requests
 		local current = redis.call('ZCARD', key)
 
+		-- Check if limit exceeded
 		if current >= limit then
 			local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
 			return {0, limit, current, oldest[2]}
 		end
 
+		-- Add current request
 		redis.call('ZADD', key, now, now)
 		redis.call('EXPIRE', key, math.ceil((window_end - window_start) / 1000000000))
 
@@ -109,6 +129,7 @@ func (rl *RedisLimiter) checkLimit(ctx context.Context, key string, limit int, w
 		return nil, fmt.Errorf("failed to check rate limit: %w", err)
 	}
 
+	// Parse Lua script result
 	resultSlice := result.([]interface{})
 	allowed := resultSlice[0].(int64) == 1
 	remaining := resultSlice[1].(int64)
@@ -130,11 +151,13 @@ func (rl *RedisLimiter) checkLimit(ctx context.Context, key string, limit int, w
 	}, nil
 }
 
+// ResetUserLimit resets the rate limit for a specific user
 func (rl *RedisLimiter) ResetUserLimit(ctx context.Context, userID uuid.UUID) error {
 	key := rl.config.UserPrefix + userID.String()
 	return rl.client.Del(ctx, key).Err()
 }
 
+// ResetIPLimit resets the rate limit for a specific IP
 func (rl *RedisLimiter) ResetIPLimit(ctx context.Context, ip string) error {
 	normalizedIP := net.ParseIP(ip)
 	if normalizedIP == nil {
@@ -151,11 +174,13 @@ func (rl *RedisLimiter) ResetIPLimit(ctx context.Context, ip string) error {
 	return rl.client.Del(ctx, key).Err()
 }
 
+// ResetGlobalLimit resets the global rate limit
 func (rl *RedisLimiter) ResetGlobalLimit(ctx context.Context) error {
 	key := rl.config.GlobalPrefix + "all"
 	return rl.client.Del(ctx, key).Err()
 }
 
+// GetUsageStats returns usage statistics for a specific key
 func (rl *RedisLimiter) GetUsageStats(ctx context.Context, key string, window time.Duration) (UsageStats, error) {
 	now := time.Now()
 	windowStart := now.Truncate(window)
@@ -189,6 +214,7 @@ func (rl *RedisLimiter) GetUsageStats(ctx context.Context, key string, window ti
 	}, nil
 }
 
+// CleanupExpiredKeys removes expired rate limit keys
 func (rl *RedisLimiter) CleanupExpiredKeys(ctx context.Context) error {
 	patterns := []string{
 		rl.config.UserPrefix + "*",
@@ -213,23 +239,16 @@ func (rl *RedisLimiter) CleanupExpiredKeys(ctx context.Context) error {
 	return nil
 }
 
+// Close closes the Redis connection
 func (rl *RedisLimiter) Close() error {
 	return rl.client.Close()
 }
 
+// UsageStats represents rate limit key usage statistics
 type UsageStats struct {
 	Key           string        `json:"key"`
 	CurrentCount  int64         `json:"current_count"`
 	WindowStart   time.Time     `json:"window_start"`
 	WindowEnd     time.Time     `json:"window_end"`
 	OldestRequest time.Time     `json:"oldest_request"`
-	NewestRequest time.Time     `json:"newest_request"`
-}
-
-func (rl *RedisLimiter) HealthCheck(ctx context.Context) error {
-	return rl.client.Ping(ctx).Err()
-}
-
-func (rl *RedisLimiter) GetRedisClient() *redis.Client {
-	return rl.client
-}
+	NewestRequest time.Time     
