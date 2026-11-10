@@ -27,7 +27,9 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 		DB:       config.RedisDB,
 	}
 
+	// Render క్లౌడ్ రెడిస్ అయితే TLS మరియు డిఫాల్ట్ యూజర్‌నేమ్ సెట్ చేయడం
 	if config.RedisAddr != "localhost:6379" && config.RedisAddr != "127.0.0.1:6379" {
+		opt.Username = "default"
 		opt.TLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
