@@ -82,4 +82,9 @@ func main() {
 
 	r.Use(ratelimiter.HTTPMiddleware())
 
-	addr :=
+	addr := fmt.Sprintf(":%d", cfg.Service.Port)
+	if err := server.RunHTTP(ctx, addr, r, logger); err != nil {
+		logger.Error("server terminated with error", "error", err)
+		os.Exit(1)
+	}
+}
