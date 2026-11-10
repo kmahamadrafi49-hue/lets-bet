@@ -21,14 +21,19 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 		config = DefaultConfig()
 	}
 
-	opt := &redis.Options{
-		Addr:     config.RedisAddr,
-		Username: "red-dbpbvgv13r2c73jnfj0", // Render Redis username
-		Password: config.RedisPassword,
-		DB:       config.RedisDB,
+	// Parse Redis URL directly so username, password, tls, and host are handled automatically
+	opt, err := redis.ParseURL(config.RedisURL)
+	if err != nil {
+		// Fallback to address if URL parsing fails
+		opt = &redis.Options{
+			Addr:     config.RedisAddr,
+			Password: config.RedisPassword,
+			DB:       config.RedisDB,
+		}
 	}
 
-	if config.RedisAddr != "localhost:6379" && config.RedisAddr != "127.0.0.1:6379" {
+	// Ensure TLS is enabled for cloud redis (rediss://)
+	if opt.TLSConfig == nil && config.RedisAddr != "localhost:6379" && config.RedisAddr != "127.0.0.1:6379" {
 		opt.TLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
