@@ -10,6 +10,7 @@ package ratelimit
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"time"
@@ -21,16 +22,25 @@ import (
 // RedisLimiter implements rate limiting using Redis
 type RedisLimiter struct {
 	client *redis.Client
-	config *Config
+	config Config
 }
 
 // NewRedisLimiter creates a new Redis-backed rate limiter
-func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error) {
-	rdb := redis.NewClient(&redis.Options{
+func NewRedisLimiter(ctx context.Context, config Config) (*RedisLimiter, error) {
+	opt := &redis.Options{
 		Addr:     config.RedisAddr,
 		Password: config.RedisPassword,
 		DB:       config.RedisDB,
-	})
+	}
+
+	// Render క్లౌడ్ రెడిస్ కోసం సెక్యూర్ TLS కనెక్షన్ ఎనేబుల్ చేయడం (లోకల్ అయితే ఆటోమేటిక్‌గా స్కిప్ అవుతుంది)
+	if config.RedisAddr != "localhost:6379" && config.RedisAddr != "127.0.0.1:6379" {
+		opt.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	rdb := redis.NewClient(opt)
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
@@ -43,14 +53,13 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 }
 
 // CheckUserLimit checks if a user has exceeded their rate limit
-func (rl *RedisLimiter) CheckUserLimit(ctx context.Context, userID uuid.UUID) (*LimitResult, error) {
+func (rl *RedisLimiter) CheckUserLimit(ctx context.Context, userID uuid.UUID, requestType RequestType) (*LimitResult, error) {
 	key := rl.config.UserPrefix + userID.String()
 	return rl.checkLimit(ctx, key, rl.config.UserRequestsPerWindow, rl.config.UserWindow, "user")
 }
 
 // CheckIPLimit checks if an IP has exceeded their rate limit
 func (rl *RedisLimiter) CheckIPLimit(ctx context.Context, ip string) (*LimitResult, error) {
-	// Normalize IP address
 	normalizedIP := net.ParseIP(ip)
 	if normalizedIP == nil {
 		return nil, fmt.Errorf("invalid IP address: %s", ip)
@@ -73,7 +82,7 @@ func (rl *RedisLimiter) CheckGlobalLimit(ctx context.Context) (*LimitResult, err
 	return rl.checkLimit(ctx, key, rl.config.GlobalRequestsPerWindow, rl.config.GlobalWindow, "global")
 }
 
-// checkLimit performs the actual rate limit check using sliding window
+// checkLimit perform the actual rate limit check using sliding window
 func (rl *RedisLimiter) checkLimit(ctx context.Context, key string, limit int, window time.Duration, limitType string) (*LimitResult, error) {
 	now := time.Now()
 	windowStart := now.Truncate(window)
@@ -81,30 +90,30 @@ func (rl *RedisLimiter) checkLimit(ctx context.Context, key string, limit int, w
 
 	// Use Lua script for atomic sliding window implementation
 	luaScript := `
-local key = KEYS[1]
-local window_start = ARGV[1]
-local window_end = ARGV[2]
-local limit = tonumber(ARGV[3])
-local now = ARGV[4]
+		local key = KEYS[1]
+		local window_start = ARGV[1]
+		local window_end = ARGV[2]
+		local limit = tonumber(ARGV[3])
+		local now = ARGV[4]
 
--- Remove expired entries
-redis.call('ZREMRANGEBYSCORE', key, 0, window_start - 1)
+		-- Remove expired entries
+		redis.call('ZREMRANGEBYSCORE', key, 0, window_start - 1)
 
--- Count current requests
-local current = redis.call('ZCARD', key)
+		-- Count current requests
+		local current = redis.call('ZCARD', key)
 
--- Check if limit exceeded
-if current >= limit then
-    local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
-    return {0, limit, current, oldest[2]}
-end
+		-- Check if limit exceeded
+		if current >= limit then
+			local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+			return {0, limit, current, oldest[2]}
+		end
 
--- Add current request
-redis.call('ZADD', key, now, now)
-redis.call('EXPIRE', key, math.ceil(tonumber(window_end - window_start) / 1000000000))
+		-- Add current request
+		redis.call('ZADD', key, now, now)
+		redis.call('EXPIRE', key, math.ceil((window_end - window_start) / 1000000000))
 
-return {1, limit - current, limit - current, now}
-`
+		return {1, limit - current, limit - current, now}
+	`
 
 	result, err := rl.client.Eval(ctx, luaScript, []string{key},
 		windowStart.UnixNano(),
@@ -117,7 +126,7 @@ return {1, limit - current, limit - current, now}
 	}
 
 	// Parse Lua script result
-	resultSlice := result.([]any)
+	resultSlice := result.([]interface{})
 	allowed := resultSlice[0].(int64) == 1
 	remaining := resultSlice[1].(int64)
 	var resetTime time.Time
@@ -168,21 +177,19 @@ func (rl *RedisLimiter) ResetGlobalLimit(ctx context.Context) error {
 }
 
 // GetUsageStats returns usage statistics for a specific key
-func (rl *RedisLimiter) GetUsageStats(ctx context.Context, key string, window time.Duration) (*UsageStats, error) {
+func (rl *RedisLimiter) GetUsageStats(ctx context.Context, key string, window time.Duration) (UsageStats, error) {
 	now := time.Now()
 	windowStart := now.Truncate(window)
 	windowEnd := windowStart.Add(window)
 
-	// Count requests in current window
 	current, err := rl.client.ZCount(ctx, key, fmt.Sprintf("%d", windowStart.UnixNano()), fmt.Sprintf("%d", now.UnixNano())).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get usage stats: %w", err)
+		return UsageStats{}, fmt.Errorf("failed to get usage stats: %w", err)
 	}
 
-	// Get oldest request timestamp
 	oldest, err := rl.client.ZRange(ctx, key, 0, 0).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get oldest request: %w", err)
+		return UsageStats{}, fmt.Errorf("failed to get oldest request: %w", err)
 	}
 
 	var oldestTime time.Time
@@ -193,7 +200,7 @@ func (rl *RedisLimiter) GetUsageStats(ctx context.Context, key string, window ti
 		}
 	}
 
-	return &UsageStats{
+	return UsageStats{
 		Key:           key,
 		CurrentCount:  int64(current),
 		WindowStart:   windowStart,
@@ -220,7 +227,6 @@ func (rl *RedisLimiter) CleanupExpiredKeys(ctx context.Context) error {
 		for _, key := range keys {
 			ttl := rl.client.TTL(ctx, key).Val()
 			if ttl == -1 {
-				// Key has no expiration, set a reasonable default
 				rl.client.Expire(ctx, key, time.Hour)
 			}
 		}
@@ -234,14 +240,14 @@ func (rl *RedisLimiter) Close() error {
 	return rl.client.Close()
 }
 
-// UsageStats represents usage statistics for a rate limit key
+// UsageStats represents rate limit key usage statistics
 type UsageStats struct {
-	Key           string    `json:"key"`
-	CurrentCount  int64     `json:"current_count"`
-	WindowStart   time.Time `json:"window_start"`
-	WindowEnd     time.Time `json:"window_end"`
-	OldestRequest time.Time `json:"oldest_request"`
-	NewestRequest time.Time `json:"newest_request"`
+	Key           string        `json:"key"`
+	CurrentCount  int64         `json:"current_count"`
+	WindowStart   time.Time     `json:"window_start"`
+	WindowEnd     time.Time     `json:"window_end"`
+	OldestRequest time.Time     `json:"oldest_request"`
+	NewestRequest time.Time     `json:"newest_request"`
 }
 
 // HealthCheck checks if the rate limiter is healthy
