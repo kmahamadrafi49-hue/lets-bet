@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -21,10 +22,19 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 		config = DefaultConfig()
 	}
 
-	// Parse Redis URL directly so username, password, tls, and host are handled automatically
-	opt, err := redis.ParseURL(config.RedisURL)
-	if err != nil {
-		// Fallback to address if URL parsing fails
+	// Read REDIS_URL directly from environment variables to avoid missing struct fields
+	redisURL := os.Getenv("REDIS_URL")
+	
+	var opt *redis.Options
+	var err error
+
+	if redisURL != "" {
+		opt, err = redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse REDIS_URL: %w", err)
+		}
+	} else {
+		// Fallback to individual fields if URL is not set
 		opt = &redis.Options{
 			Addr:     config.RedisAddr,
 			Password: config.RedisPassword,
@@ -33,7 +43,7 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 	}
 
 	// Ensure TLS is enabled for cloud redis (rediss://)
-	if opt.TLSConfig == nil && config.RedisAddr != "localhost:6379" && config.RedisAddr != "127.0.0.1:6379" {
+	if opt.TLSConfig == nil && opt.Addr != "localhost:6379" && opt.Addr != "127.0.0.1:6379" {
 		opt.TLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
