@@ -13,10 +13,14 @@ import (
 
 type RedisLimiter struct {
 	client *redis.Client
-	config Config
+	config *Config
 }
 
-func NewRedisLimiter(ctx context.Context, config Config) (*RedisLimiter, error) {
+func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error) {
+	if config == nil {
+		config = DefaultConfig()
+	}
+
 	opt := &redis.Options{
 		Addr:     config.RedisAddr,
 		Password: config.RedisPassword,
