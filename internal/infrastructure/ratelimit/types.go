@@ -1,50 +1,32 @@
 // Package ratelimit provides Redis-backed rate limiting for the betting platform.
-//
-// It implements:
-// - Per-user rate limiting
-// - Per-IP rate limiting
-// - Sliding window algorithm
-// - Distributed rate limiting across multiple instances
-// - Configurable limits and windows
 package ratelimit
 
 import (
-	"context"
-	"crypto/tls"
 	"time"
-
-	"github.com/go-redis/redis/v8"
 )
 
 // Config holds rate limiting configuration
 type Config struct {
-	// Default limits
 	DefaultRequestsPerWindow int
 	DefaultWindow            time.Duration
 
-	// User-specific limits
 	UserRequestsPerWindow int
 	UserWindow            time.Duration
 
-	// IP-specific limits
 	IPRequestsPerWindow int
 	IPWindow            time.Duration
 
-	// Global limits (across all users/IPs)
 	GlobalRequestsPerWindow int
 	GlobalWindow            time.Duration
 
-	// Redis configuration
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
 
-	// Key prefixes
 	UserPrefix   string
 	IPPrefix     string
 	GlobalPrefix string
 
-	// Proxy validation for preventing X-Forwarded-For spoofing
 	TrustedProxyCIDRs []string
 }
 
@@ -63,15 +45,9 @@ func DefaultConfig() *Config {
 		RedisPassword:            "",
 		RedisDB:                  0,
 		UserPrefix:               "rate_limit:user:",
-		IPPrefix:                 "rate_limit:ip:",
+		IPPrefix:               "rate_limit:ip:",
 		GlobalPrefix:             "rate_limit:global:",
 	}
-}
-
-// RateLimiter provides Redis-backed rate limiting
-type RateLimiter struct {
-	redisClient *redis.Client
-	config      *Config
 }
 
 // RequestType represents the type of request being rate limited
@@ -145,14 +121,14 @@ type GlobalLimit struct {
 
 // RateLimitMetrics represents rate limiting metrics
 type RateLimitMetrics struct {
-	TotalRequests     int64         `json:"total_requests"`
-	AllowedRequests   int64         `json:"allowed_requests"`
-	BlockedRequests   int64         `json:"blocked_requests"`
-	UserLimits        int64         `json:"user_limits"`
-	IPLimits          int64         `json:"ip_limits"`
-	GlobalLimits      int64         `json:"global_limits"`
+	TotalRequests       int64         `json:"total_requests"`
+	AllowedRequests     int64         `json:"allowed_requests"`
+	BlockedRequests     int64         `json:"blocked_requests"`
+	UserLimits          int64         `json:"user_limits"`
+	IPLimits            int64         `json:"ip_limits"`
+	GlobalLimits        int64         `json:"global_limits"`
 	AverageResponseTime time.Duration `json:"average_response_time"`
-	LastResetTime     time.Time     `json:"last_reset_time"`
+	LastResetTime       time.Time     `json:"last_reset_time"`
 }
 
 // RateLimitInfo represents comprehensive rate limit information
@@ -165,28 +141,22 @@ type RateLimitInfo struct {
 
 // RateLimitStore interface for rate limiting operations
 type RateLimitStore interface {
-	// Basic rate limiting
 	CheckLimit(ctx context.Context, key string, limit int, window time.Duration) (*LimitResult, error)
 	IncrementRequest(ctx context.Context, key string, window time.Duration) (int64, error)
 	ResetLimit(ctx context.Context, key string) error
 
-	// User-specific operations
 	CheckUserLimit(ctx context.Context, userID string, requestType RequestType) (*LimitResult, error)
 	GetUserLimitInfo(ctx context.Context, userID string) (*UserLimit, error)
 
-	// IP-specific operations
 	CheckIPLimit(ctx context.Context, ip string, requestType RequestType) (*LimitResult, error)
 	GetIPLimitInfo(ctx context.Context, ip string) (*IPLimit, error)
 
-	// Global operations
 	CheckGlobalLimit(ctx context.Context, requestType RequestType) (*LimitResult, error)
 	GetGlobalLimitInfo(ctx context.Context) (*GlobalLimit, error)
 
-	// Metrics and info
 	GetMetrics(ctx context.Context) (*RateLimitMetrics, error)
 	GetRateLimitInfo(ctx context.Context) (*RateLimitInfo, error)
 
-	// Cleanup operations
 	CleanupExpiredKeys(ctx context.Context) error
 	ResetAllLimits(ctx context.Context) error
 }
@@ -203,13 +173,13 @@ type LimitKey struct {
 
 // RateLimitConfig represents configuration for different request types
 type RateLimitConfig struct {
-	Auth    *LimitConfig `json:"auth"`
-	Bet     *LimitConfig `json:"bet"`
-	Deposit *LimitConfig `json:"deposit"`
+	Auth     *LimitConfig `json:"auth"`
+	Bet      *LimitConfig `json:"bet"`
+	Deposit  *LimitConfig `json:"deposit"`
 	Withdraw *LimitConfig `json:"withdraw"`
-	Odds    *LimitConfig `json:"odds"`
-	Profile *LimitConfig `json:"profile"`
-	Generic *LimitConfig `json:"generic"`
+	Odds     *LimitConfig `json:"odds"`
+	Profile  *LimitConfig `json:"profile"`
+	Generic  *LimitConfig `json:"generic"`
 }
 
 // GetDefaultRateLimitConfig returns default rate limit configurations
@@ -251,39 +221,4 @@ func GetDefaultRateLimitConfig() RateLimitConfig {
 			KeyPrefix:         "generic:",
 		},
 	}
-}
-
-// NewRedisLimiter creates a new Redis rate limiter instance with TLS support
-func NewRedisLimiter(ctx context.Context, cfg Config) (*RateLimiter, error) {
-	opt := &redis.Options{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       cfg.RedisDB,
-	}
-
-	// Render క్లౌడ్ రెడిస్ కోసం సెక్యూర్ TLS కనెక్షన్ ఎనేబుల్ చేయడం
-	if cfg.RedisPassword != "" && cfg.RedisAddr != "localhost:6379" {
-		opt.TLSConfig = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
-	}
-
-	client := redis.NewClient(opt)
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, err
-	}
-
-	return &RateLimiter{
-		redisClient: client,
-		config:      &cfg,
-	}, nil
-}
-
-// Close closes the Redis connection
-func (r *RateLimiter) Close() error {
-	if r.redisClient != nil {
-		return r.redisClient.Close()
-	}
-	return nil
 }
