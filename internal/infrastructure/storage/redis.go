@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -22,13 +23,22 @@ type RedisConfig struct {
 	DB       int
 }
 
-// NewRedisCache creates a new Redis cache instance
+// NewRedisCache creates a new Redis cache instance with TLS support for Render cloud
 func NewRedisCache(cfg RedisConfig) (*RedisCache, error) {
-	rdb := redis.NewClient(&redis.Options{
+	opt := &redis.Options{
 		Addr:     fmt.Sprintf("%s:%s", cfg.Host, cfg.Port),
 		Password: cfg.Password,
 		DB:       cfg.DB,
-	})
+	}
+
+	// Render క్లౌడ్ రెడిస్ కోసం సెక్యూర్ TLS కనెక్షన్ ఎనేబుల్ చేస్తున్నాము
+	if cfg.Password != "" && cfg.Host != "localhost" {
+		opt.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	rdb := redis.NewClient(opt)
 
 	// Test connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
