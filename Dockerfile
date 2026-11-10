@@ -1,6 +1,5 @@
 FROM golang:1.26-alpine AS builder
 
-ARG SERVICE=gateway
 WORKDIR /src
 
 RUN apk add --no-cache git ca-certificates curl
@@ -11,7 +10,7 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOFLAGS="-trimpath" \
-    go build -ldflags="-s -w" -o /out/app ./cmd/$(SERVICE)
+    go build -ldflags="-s -w" -o /out/app ./cmd/gateway
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
@@ -22,7 +21,7 @@ COPY --from=builder /src/migrations /app/migrations
 
 ENV REDIS_HOST=ohio-keyvalue.render.com
 ENV REDIS_PORT=6379
-ENV REDIS_PASSWORD=ClNOkUmebWp7GSloeU8smJOL82qgs4H
+ENV REDIS_PASSWORDClNOkUmebWp7GSloeU8smJOL82qgs4H
 ENV REDIS_DB=0
 
 USER nonroot:nonroot
