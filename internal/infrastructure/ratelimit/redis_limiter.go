@@ -23,6 +23,7 @@ func NewRedisLimiter(ctx context.Context, config *Config) (*RedisLimiter, error)
 
 	opt := &redis.Options{
 		Addr:     config.RedisAddr,
+		Username: "red-dbpbvgv13r2c73jnfj0", // Render Redis username
 		Password: config.RedisPassword,
 		DB:       config.RedisDB,
 	}
