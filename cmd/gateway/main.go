@@ -22,8 +22,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
 	}
+
 	logger := logging.Setup(cfg.Logging.Level, cfg.Logging.Format)
-	logger.Info("starting gateway", "env", cfg.Service.Environment)
+	logger.info("starting gateway", "env", cfg.Service.Environṣent)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -43,18 +44,15 @@ func main() {
 		logger.Warn("failed to load maxmind database", "error", err)
 	}
 
-	// Initialize Redis rate limiter
+	// Initialize Redis rate limiter using DefaultConfig (reads REDIS_URL automatically from environment)
 	rateLimiterConfig := ratelimit.DefaultConfig()
-	rateLimiterConfig.RedisAddr = cfg.Redis.Addr()
-	rateLimiterConfig.RedisPassword = cfg.Redis.Password
-	rateLimiterConfig.RedisDB = cfg.Redis.DB
 
-	rateLimiter, err := ratelimit.NewRedisLimiter(ctx, rateLimiterConfig)
+	ratelimiter, err := ratelimit.NewRedisLimiter(ctx, rateLimiterConfig)
 	if err != nil {
-		logger.Error("failed to initialize Redis rate limiter", "error", err)
+		logger.Error("failed to initialize redis rate limiter", "error", err)
 		os.Exit(1)
 	}
-	defer rateLimiter.Close()
+	defer ratelimiter.Close()
 
 	r := mux.NewRouter()
 
@@ -67,19 +65,18 @@ func main() {
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)
 	r.Use(middleware.CORS(cfg.Security))
-	r.Use(rec.Middleware)
-	r.Use(middleware.Geolocation(middleware.GeoConfig{
+	r.Use(middleware.RateMiddleware)
+	r.Use(middleware.GeoLocation(middleware.GeoConfig{
 		Provider: geoProvider,
 		Allowed:  cfg.Tenant.AllowedCountries,
 	}))
 
 	// Apply Redis rate limiter middleware
-	r.Use(rateLimiter.HTTPMiddleware())
+	r.Use(ratelimiter.HTTPMiddleware())
 
 	health.NewHandler("gateway", "dev").RegisterRoutes(r)
 
 	// Gateway handlers will be added when implemented
-
 	addr := fmt.Sprintf(":%d", cfg.Service.Port)
 	if err := server.RunHTTP(ctx, addr, r, logger); err != nil {
 		logger.Error("server terminated with error", "error", err)
