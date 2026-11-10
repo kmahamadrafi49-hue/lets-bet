@@ -50,6 +50,7 @@ func main() {
 
 	r := mux.NewRouter()
 
+	// Base Test Routes
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Lets-Bet Server is Working Perfectly! 🚀"))
@@ -60,6 +61,18 @@ func main() {
 		w.Write([]byte("OK"))
 	}).Methods("GET")
 
+	// ==========================================
+	// API Routes Integration (Auth, Wallet, Games, Admin, etc.)
+	// ==========================================
+	apiRouter := r.PathPrefix("/api/v1").Subrouter()
+
+	// Example placeholders for registering core features / game endpoints
+	apiRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"API Gateway Operational"}`))
+	}).Methods("GET")
+
+	// Metrics & Monitoring
 	rec := metrics.New("gateway")
 	rec.RegisterRoutes(r)
 
@@ -69,7 +82,6 @@ func main() {
 	r.Use(middleware.Recovery)
 	r.Use(middleware.Logging)
 	r.Use(middleware.CORS(cfg.Security))
-
 	r.Use(ratelimiter.HTTPMiddleware())
 
 	addr := fmt.Sprintf(":%d", cfg.Service.Port)
