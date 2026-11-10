@@ -2,6 +2,7 @@
 package ratelimit
 
 import (
+	"context"
 	"time"
 )
 
@@ -45,7 +46,7 @@ func DefaultConfig() *Config {
 		RedisPassword:            "",
 		RedisDB:                  0,
 		UserPrefix:               "rate_limit:user:",
-		IPPrefix:               "rate_limit:ip:",
+		IPPrefix:                 "rate_limit:ip:",
 		GlobalPrefix:             "rate_limit:global:",
 	}
 }
