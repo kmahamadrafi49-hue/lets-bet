@@ -1,6 +1,16 @@
-r := mux.NewRouter()
+package main
 
-	// FORCE OVERRIDE: Serve index.html and static files robustly
+import (
+	"net/http"
+	"os"
+
+	"github.com/gorilla/mux"
+)
+
+func main() {
+	r := mux.NewRouter()
+
+	// Route for serving index.html correctly from /app directory
 	r.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		if _, err := os.Stat("index.html"); err == nil {
 			http.ServeFile(w, req, "index.html")
@@ -11,7 +21,10 @@ r := mux.NewRouter()
 		}
 	})
 
-	// Static files mariyu images kosam correct file server mapping
+	// Static Files and Images mapping
 	r.PathPrefix("/images/").Handler(http.FileServer(http.Dir(".")))
 	r.PathPrefix("/static/").Handler(http.FileServer(http.Dir(".")))
-	r.PathPrefix("/row-").Handler(http.FileServer(http.Dir(".")))
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir(".")))
+
+	http.ListenAndServe(":8080", r)
+}
