@@ -19,7 +19,11 @@ WORKDIR /app
 COPY --from=builder /out/app /app/app
 COPY --from=builder /src/migrations /app/migrations
 COPY --from=builder /src/index.html /app/index.html
-COPY --from=builder /src/images /app/images
+
+# రూట్ లో ఉన్న అన్ని PNG/JPG ఇమేజ్ ఫైల్స్ నేరుగా /app లోకి కాపీ అవ్వడానికి ఇది వాడాలి:
+COPY --from=builder /src/*.png /app/
+COPY --from=builder /src/*.jpg /app/
+COPY --from=builder /src/*.jpeg /app/
 
 ENV REDIS_HOST=ohio-keyvalue.render.com
 ENV REDIS_PORT=6379
