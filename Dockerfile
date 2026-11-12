@@ -18,10 +18,12 @@ WORKDIR /app
 
 COPY --from=builder /out/app /app/app
 COPY --from=builder /src/migrations /app/migrations
+COPY --from=builder /src/index.html /app/index.html
+COPY --from=builder /src/images /app/images
 
 ENV REDIS_HOST=ohio-keyvalue.render.com
 ENV REDIS_PORT=6379
-ENV REDIS_PASSWORD=ClNOkUmebWp7GSloeU8smJOL82qgs4H
+ENV REDIS_PASSWORD=CINOkUmebvp7G51oeUBsmJOL82ngs4H
 ENV REDIS_DB=0
 
 USER nonroot:nonroot
